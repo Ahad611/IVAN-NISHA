@@ -1,232 +1,99 @@
 import asyncio
-import os
-import re
-import json
 from typing import Union
+import httpx
 
-import yt_dlp
-from pyrogram.enums import MessageEntityType
-from pyrogram.types import Message
-from youtubesearchpython.__future__ import VideosSearch
-
-from SYSTUM.utils.database import is_on_off
-from SYSTUM.utils.formatters import time_to_seconds
-
-
-
-import os
-import glob
-import random
-import logging
-
-def cookie_txt_file():
-    folder_path = f"{os.getcwd()}/cookies"
-    filename = f"{os.getcwd()}/cookies/logs.csv"
-    txt_files = glob.glob(os.path.join(folder_path, '*.txt'))
-    if not txt_files:
-        raise FileNotFoundError("No .txt files found in the specified folder.")
-    cookie_txt_file = random.choice(txt_files)
-    with open(filename, 'a') as file:
-        file.write(f'Choosen File : {cookie_txt_file}\n')
-    return f"""cookies/{str(cookie_txt_file).split("/")[-1]}"""
-
-
-
-async def check_file_size(link):
-    async def get_format_info(link):
-        proc = await asyncio.create_subprocess_exec(
-            "yt-dlp",
-            "--cookies", cookie_txt_file(),
-            "-J",
-            link,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        stdout, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            print(f'Error:\n{stderr.decode()}')
-            return None
-        return json.loads(stdout.decode())
-
-    def parse_size(formats):
-        total_size = 0
-        for format in formats:
-            if 'filesize' in format:
-                total_size += format['filesize']
-        return total_size
-
-    info = await get_format_info(link)
-    if info is None:
-        return None
-    
-    formats = info.get('formats', [])
-    if not formats:
-        print("No formats found.")
-        return None
-    
-    total_size = parse_size(formats)
-    return total_size
-
-async def shell_cmd(cmd):
-    proc = await asyncio.create_subprocess_shell(
-        cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    out, errorz = await proc.communicate()
-    if errorz:
-        if "unavailable videos are hidden" in (errorz.decode("utf-8")).lower():
-            return out.decode("utf-8")
-        else:
-            return errorz.decode("utf-8")
-    return out.decode("utf-8")
-
+API_URL = "https://api.thequickearn.xyz"
+VIDEO_API_URL = "https://api.video.thequickearn.xyz"
+API_KEY = "30DxNexGenBots121b50"
 
 class YouTubeAPI:
     def __init__(self):
-        self.base = "https://www.youtube.com/watch?v="
-        self.regex = r"(?:youtube\.com|youtu\.be)"
-        self.status = "https://www.youtube.com/oembed?url="
-        self.listbase = "https://youtube.com/playlist?list="
-        self.reg = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+        self.api_headers = {"Authorization": f"Bearer {API_KEY}"}
 
-    async def exists(self, link: str, videoid: Union[bool, str] = None):
-        if videoid:
-            link = self.base + link
-        if re.search(self.regex, link):
-            return True
-        else:
-            return False
+    # ----------------- Video Details -----------------
+    async def details(self, video_id: str):
+        """Fetch full video details"""
+        url = f"{VIDEO_API_URL}/details/{video_id}"
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url, headers=self.api_headers)
+            if resp.status_code != 200:
+                return None
+            data = resp.json()
+            return (
+                data.get("title"),
+                data.get("duration"),
+                data.get("duration_sec"),
+                data.get("thumbnail"),
+                data.get("id")
+            )
 
-    async def url(self, message_1: Message) -> Union[str, None]:
-        messages = [message_1]
-        if message_1.reply_to_message:
-            messages.append(message_1.reply_to_message)
-        text = ""
-        offset = None
-        length = None
-        for message in messages:
-            if offset:
-                break
-            if message.entities:
-                for entity in message.entities:
-                    if entity.type == MessageEntityType.URL:
-                        text = message.text or message.caption
-                        offset, length = entity.offset, entity.length
-                        break
-            elif message.caption_entities:
-                for entity in message.caption_entities:
-                    if entity.type == MessageEntityType.TEXT_LINK:
-                        return entity.url
-        if offset in (None,):
-            return None
-        return text[offset : offset + length]
+    async def title(self, video_id: str):
+        details = await self.details(video_id)
+        return details[0] if details else None
 
-    async def details(self, link: str, videoid: Union[bool, str] = None):
-        if videoid:
-            link = self.base + link
-        if "&" in link:
-            link = link.split("&")[0]
-        results = VideosSearch(link, limit=1)
-        for result in (await results.next())["result"]:
-            title = result["title"]
-            duration_min = result["duration"]
-            thumbnail = result["thumbnails"][0]["url"].split("?")[0]
-            vidid = result["id"]
-            if str(duration_min) == "None":
-                duration_sec = 0
-            else:
-                duration_sec = int(time_to_seconds(duration_min))
-        return title, duration_min, duration_sec, thumbnail, vidid
+    async def duration(self, video_id: str):
+        details = await self.details(video_id)
+        return details[1] if details else None
 
-    async def title(self, link: str, videoid: Union[bool, str] = None):
-        if videoid:
-            link = self.base + link
-        if "&" in link:
-            link = link.split("&")[0]
-        results = VideosSearch(link, limit=1)
-        for result in (await results.next())["result"]:
-            title = result["title"]
-        return title
+    async def thumbnail(self, video_id: str):
+        details = await self.details(video_id)
+        return details[3] if details else None
 
-    async def duration(self, link: str, videoid: Union[bool, str] = None):
-        if videoid:
-            link = self.base + link
-        if "&" in link:
-            link = link.split("&")[0]
-        results = VideosSearch(link, limit=1)
-        for result in (await results.next())["result"]:
-            duration = result["duration"]
-        return duration
+    # ----------------- Download -----------------
+    async def download(self, video_id: str, quality: str = "720p", audio_only: bool = False):
+        """Get download link from API"""
+        url = f"{VIDEO_API_URL}/download/{video_id}"
+        params = {"quality": quality, "audio_only": audio_only}
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url, headers=self.api_headers, params=params)
+            if resp.status_code != 200:
+                return None
+            return resp.json().get("download_url")
 
-    async def thumbnail(self, link: str, videoid: Union[bool, str] = None):
-        if videoid:
-            link = self.base + link
-        if "&" in link:
-            link = link.split("&")[0]
-        results = VideosSearch(link, limit=1)
-        for result in (await results.next())["result"]:
-            thumbnail = result["thumbnails"][0]["url"].split("?")[0]
-        return thumbnail
+    # ----------------- Playlist -----------------
+    async def playlist(self, playlist_id: str, limit: int = 10):
+        url = f"{VIDEO_API_URL}/playlist/{playlist_id}"
+        params = {"limit": limit}
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url, headers=self.api_headers, params=params)
+            if resp.status_code != 200:
+                return []
+            return resp.json().get("videos", [])
 
-    async def video(self, link: str, videoid: Union[bool, str] = None):
-        if videoid:
-            link = self.base + link
-        if "&" in link:
-            link = link.split("&")[0]
-        proc = await asyncio.create_subprocess_exec(
-            "yt-dlp",
-            "--cookies",cookie_txt_file(),
-            "-g",
-            "-f",
-            "best[height<=?720][width<=?1280]",
-            f"{link}",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await proc.communicate()
-        if stdout:
-            return 1, stdout.decode().split("\n")[0]
-        else:
-            return 0, stderr.decode()
+    # ----------------- Search -----------------
+    async def search(self, query: str, limit: int = 5):
+        url = f"{API_URL}/search"
+        params = {"query": query, "limit": limit}
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url, headers=self.api_headers, params=params)
+            if resp.status_code != 200:
+                return []
+            return resp.json().get("results", [])
 
-    async def playlist(self, link, limit, user_id, videoid: Union[bool, str] = None):
-        if videoid:
-            link = self.listbase + link
-        if "&" in link:
-            link = link.split("&")[0]
-        playlist = await shell_cmd(
-            f"yt-dlp -i --get-id --flat-playlist --cookies {cookie_txt_file()} --playlist-end {limit} --skip-download {link}"
-        )
-        try:
-            result = playlist.split("\n")
-            for key in result:
-                if key == "":
-                    result.remove(key)
-        except:
-            result = []
-        return result
+    # ----------------- Formats -----------------
+    async def formats(self, video_id: str):
+        """Get available formats"""
+        url = f"{VIDEO_API_URL}/formats/{video_id}"
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url, headers=self.api_headers)
+            if resp.status_code != 200:
+                return []
+            return resp.json().get("formats", [])
 
-    async def track(self, link: str, videoid: Union[bool, str] = None):
-        if videoid:
-            link = self.base + link
-        if "&" in link:
-            link = link.split("&")[0]
-        results = VideosSearch(link, limit=1)
-        for result in (await results.next())["result"]:
-            title = result["title"]
-            duration_min = result["duration"]
-            vidid = result["id"]
-            yturl = result["link"]
-            thumbnail = result["thumbnails"][0]["url"].split("?")[0]
+    # ----------------- Track -----------------
+    async def track(self, video_id: str):
+        """Return track details like title, link, duration, thumbnail"""
+        details = await self.details(video_id)
+        if not details:
+            return None, None
         track_details = {
-            "title": title,
-            "link": yturl,
-            "vidid": vidid,
-            "duration_min": duration_min,
-            "thumb": thumbnail,
+            "title": details[0],
+            "link": f"https://youtu.be/{details[4]}",
+            "vidid": details[4],
+            "duration_min": details[1],
+            "thumb": details[3],
         }
-        return track_details, vidid
+        return track_details, details[4]
 
     async def formats(self, link: str, videoid: Union[bool, str] = None):
         if videoid:
